@@ -33,6 +33,14 @@ const bufs = Dict{ASCIIString,IOBuffer}()
 const stream_interval = 0.1
 const max_bytes = 10*1024
 
+function send_stream(s::AbstractString, name::AbstractString)
+    # @vprintln("send_stream in $(tasks[current_task()])")
+    prev_send_time[name] = time()
+    send_ipython(publish,
+                     msg_pub(execute_msg, "stream",
+                             @compat Dict("name" => name, "text" => s)))
+end
+
 """Continually read from (size limited) Libuv/OS buffer into an (effectively unlimited) `IObuffer`
 to avoid problems when the Libuv/OS buffer gets full (https://github.com/JuliaLang/julia/issues/8789).
 Send data immediately when buffer contains more than `max_bytes` bytes. Otherwise, if data is available
@@ -41,18 +49,30 @@ function watch_stream(rd::IO, name::AbstractString)
     task_local_storage(:IJulia_task, "read $name task")
     try
         buf = IOBuffer()
-        bufs[name] = buf
+        bufs[name] = buf #store the buf so it can be sent in main task when execution completes
+        stream_interval = 0.05
+        max_bytes = 1024
+        prev_debug = 0.0
         while !eof(rd) # blocks until something is available
+            # @vprintln("eof return in watch_stream in $(tasks[current_task()]). nb_available is $(nb_available(rd)) status is $(rd.status)")
+            # @vprintln("wake nb_available is $(nb_available(rd))")
+            # Base.start_reading()
             nb = nb_available(rd)
             if nb > 0
                 write(buf, readbytes(rd, nb))
             end
-            if buf.size > 0
-                if buf.size >= max_bytes
-                    #send immediately
-                    send_stream(name)
-                end
+            if buf.size >= max_bytes
+                #send immediately
+                send_stream(name)
             end
+            # if buf.size > 0
+            #     next_send_time[name] = nb > max_bytes ? time() : prev_send_time[name] + stream_interval
+            #     @vprintln("next_send_time[name] is $(string(Dates.unix2datetime(next_send_time[name]))[12:end]) buf.size: $buf.size")
+            #     if fire_time[send_timer[name]] > next_send_time[name]
+            #         Timer(next_send_time[name], schedule_send(name))
+            #     tasks[schedsend_task] = "schedsend $name"
+            # end
+            # @vprintln("$(tasks[current_task()]) will block now and await output in eof()")
         end
     catch e
         # the IPython manager may send us a SIGINT if the user
@@ -121,6 +141,22 @@ function num_utf8_trailing(d::Vector{UInt8})
     return nend == n ? 0 : nend
 end
 
+# next_send_time = Dict{AbstractString, Float64}()
+# prev_send_time = Dict{AbstractString, Float64}()
+# bufs = Dict{AbstractString,IOBuffer}()
+# function schedule_send(name)
+#     sleep_time = next_send_time[name] - time()
+#     @vprintln("schedule_send $name sleep_time is $sleep_time")
+#     (sleep_time > 0) && sleep(sleep_time)
+#     buf_to_stream(name)
+# end
+
+# function buf_to_stream(name::AbstractString)
+#     if bufs[name].size > 0
+#         send_stream(takebuf_string(bufs[name]),name)
+#     end
+# end
+
 # this is hacky: we overload some of the I/O functions on pipe endpoints
 # in order to fix some interactions with stdio.
 if VERSION < v"0.4.0-dev+6987" # JuliaLang/julia#12739
@@ -180,6 +216,40 @@ function oslibuv_flush()
     yield()
     yield()
 end
+# =======
+    # global tasks = Dict(current_task() => "OG task")
+    # @vprintln("tasks is", tasks)
+    # read_task = @async watch_stream(read_stdout, "stdout")
+    # tasks[read_task] = "read stdout task"
+    # prev_send_time["stdout"] = 0.0 #initialise
+    # if capture_stderr
+    #     readerr_task = @async watch_stream(read_stderr, "stderr")
+    #     tasks[readerr_task] = "read stderr task"
+    #     prev_send_time["stderr"] = 0.0
+    # end
+    # end
+
+# import Base.wait_readnb
+# function wait_readnb(x::Base.LibuvStream, nb::Int)
+#     oldthrottle = x.throttle
+#     Base.preserve_handle(x)
+#     try
+#         while isopen(x) && nb_available(x.buffer) < nb
+#             x.throttle = max(nb, x.throttle)
+#             Base.start_reading(x) # ensure we are reading
+#             wait(x.readnotify)
+#         end
+#     finally
+#         if oldthrottle <= x.throttle <= nb
+#             x.throttle = oldthrottle
+#         end
+#         # if isempty(x.readnotify.waitq)
+#         #     # stop_reading(x) # stop reading iff there are currently no other read clients of the stream
+#         # end
+#         Base.unpreserve_handle(x)
+#     end
+# end
+# >>>>>>> Somewhat working... using non-standard throttle
 
 import Base.flush
 function flush(io::StdioPipe)
