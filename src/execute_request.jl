@@ -145,12 +145,6 @@ function execute_request_0x535c5df2(socket, msg)
     code = msg.content["code"]
     @vprintln("EXECUTING ", code)
     global execute_msg = msg
-    if haskey(prev_send_time, "stdout") && haskey(prev_send_time, "stderr")
-        tdiff = time() - max(prev_send_time["stdout"], prev_send_time["stderr"])
-        @vprintln("exec tdiff is: $tdiff")
-    end
-    prev_send_time["stdout"] = time()
-    prev_send_time["stderr"] = time()
     global _n, In, Out, ans
     silent = msg.content["silent"]
     store_history = get(msg.content, "store_history", !silent)

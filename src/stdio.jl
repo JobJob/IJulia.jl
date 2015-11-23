@@ -35,7 +35,6 @@ const max_bytes = 10*1024
 
 function send_stream(s::AbstractString, name::AbstractString)
     # @vprintln("send_stream in $(tasks[current_task()])")
-    prev_send_time[name] = time()
     send_ipython(publish,
                      msg_pub(execute_msg, "stream",
                              @compat Dict("name" => name, "text" => s)))
@@ -141,21 +140,8 @@ function num_utf8_trailing(d::Vector{UInt8})
     return nend == n ? 0 : nend
 end
 
-# next_send_time = Dict{AbstractString, Float64}()
-# prev_send_time = Dict{AbstractString, Float64}()
-# bufs = Dict{AbstractString,IOBuffer}()
-# function schedule_send(name)
-#     sleep_time = next_send_time[name] - time()
-#     @vprintln("schedule_send $name sleep_time is $sleep_time")
-#     (sleep_time > 0) && sleep(sleep_time)
-#     buf_to_stream(name)
-# end
-
-# function buf_to_stream(name::AbstractString)
-#     if bufs[name].size > 0
-#         send_stream(takebuf_string(bufs[name]),name)
-#     end
-# end
+const send_throttle = 1.0
+throttled_buf_to_stream = throttle(buf_to_stream, send_throttle; leading=false)
 
 # this is hacky: we overload some of the I/O functions on pipe endpoints
 # in order to fix some interactions with stdio.
