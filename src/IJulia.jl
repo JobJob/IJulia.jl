@@ -116,10 +116,8 @@ function init(args)
     global write_stderr
     read_stdin, write_stdin = redirect_stdin()
     read_stdout, write_stdout = redirect_stdout()
-#     Base.start_reading(read_stdout)
     if capture_stderr
         read_stderr, write_stderr = redirect_stderr()
-#         Base.start_reading(read_stderr)
     else
         read_stderr, write_stderr = IOBuffer(), IOBuffer()
     end
