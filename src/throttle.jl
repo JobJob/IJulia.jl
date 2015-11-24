@@ -5,7 +5,8 @@ Normally, the throttled function will run as much as it can, without ever going 
 but if you’d like to disable the execution on the leading edge, pass leading=false.
 To disable execution on the trailing edge, ditto.
 """
-function throttle(func, wait; leading=true, trailing=true )
+
+throttle(func, wait; leading=true, trailing=true) = begin
     timer = Timer((t)->nothing,0.0) #dummy timer that we close immediately
     close(timer)
     previous = 0.0
@@ -13,11 +14,13 @@ function throttle(func, wait; leading=true, trailing=true )
         later(t) = begin
             previous = leading == false ? 0.0 : time()
             close(timer)
+            # println(orig_STDOUT, get_log_ts(), "here's one we prepared earlier")
             result = func(args...)
         end
         now = time()
         if previous == 0.0 && leading == false
             previous = now
+            # println(orig_STDOUT, get_log_ts(), "Your time starts... now")
         end
         remaining = wait - (now - previous)
         if (remaining <= 0.0)
@@ -25,11 +28,10 @@ function throttle(func, wait; leading=true, trailing=true )
                 close(timer)
             end
             previous = now
+            # println(orig_STDOUT, get_log_ts(), "good timing, remaining: $remaining")
             func(args...)
         elseif (!isopen(timer) && trailing != false)
             timer = Timer(later, remaining)
-        else
-            println(orig_STDOUT, "throttle: not scheduling and not running")
         end
         return timer
     end

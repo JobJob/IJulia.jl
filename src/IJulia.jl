@@ -4,13 +4,13 @@ module IJulia
 using Compat
 
 # in the Jupyter front-end, enable verbose output via IJulia.set_verbose()
-verbose = true
+verbose = false
 function set_verbose(v::Bool=true)
     global verbose::Bool = v
 end
 
 # set this to false for debugging, to disable stderr redirection
-const capture_stderr = false
+const capture_stderr = true
 
 using ZMQ
 using JSON
@@ -139,7 +139,6 @@ function eventloop(socket)
     task_local_storage(:IJulia_task, "write task")
     try
         while true
-            @vprintln("about to wait for recieve message")
             msg = recv_ipython(socket)
             try
                 send_status("busy", msg.header)

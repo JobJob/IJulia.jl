@@ -181,7 +181,7 @@ function execute_request_0x535c5df2(socket, msg)
         #run the code!
         @vprintln("code: ",code)
         ans = result = include_string(code, "In[$_n]")
-        @vprintln("res: ",ans)
+        @vprintln("code: ",res)
 
         if silent
             result = nothing
@@ -203,9 +203,7 @@ function execute_request_0x535c5df2(socket, msg)
         end
 
         # flush pending stdio
-        @vprintln("before post-execution flush")
         flush_all()
-        @vprintln("after post-execution flush")
 
         undisplay(result) # dequeue if needed, since we display result in pyout
         display() # flush pending display requests
@@ -214,7 +212,6 @@ function execute_request_0x535c5df2(socket, msg)
             # Work around for Julia issue #265 (see # #7884 for context)
             # We have to explicitly invoke the correct metadata method.
             result_metadata = invoke(metadata, (typeof(result),), result)
-            @vprintln("now sending the result")
             send_ipython(publish,
                          msg_pub(msg, "execute_result",
                                  @compat Dict("execution_count" => _n,

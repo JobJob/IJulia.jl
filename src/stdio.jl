@@ -48,10 +48,7 @@ function watch_stream(rd::IO, name::AbstractString)
     task_local_storage(:IJulia_task, "read $name task")
     try
         buf = IOBuffer()
-        bufs[name] = buf #store the buf so it can be sent in main task when execution completes
-        stream_interval = 0.05
-        max_bytes = 1024
-        prev_debug = 0.0
+        bufs[name] = buf
         while !eof(rd) # blocks until something is available
             # @vprintln("eof return in watch_stream in $(tasks[current_task()]). nb_available is $(nb_available(rd)) status is $(rd.status)")
             # @vprintln("wake nb_available is $(nb_available(rd))")
@@ -139,9 +136,6 @@ function num_utf8_trailing(d::Vector{UInt8})
     nend = length(d) + 1 - i # num bytes from i to end
     return nend == n ? 0 : nend
 end
-
-const send_throttle = 1.0
-throttled_buf_to_stream = throttle(buf_to_stream, send_throttle; leading=false)
 
 # this is hacky: we overload some of the I/O functions on pipe endpoints
 # in order to fix some interactions with stdio.
@@ -232,7 +226,7 @@ end
 
 function oslibuv_flush()
     #refs: https://github.com/JuliaLang/IJulia.jl/issues/347#issuecomment-144505862
-    #and https://github.com/JuliaLang/IJulia.jl/issues/347#issuecomment-144605024
+    #      https://github.com/JuliaLang/IJulia.jl/issues/347#issuecomment-144605024
     @windows_only ccall(:SwitchToThread, stdcall, Void, ())
     yield()
     yield()
