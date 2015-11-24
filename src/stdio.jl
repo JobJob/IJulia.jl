@@ -195,13 +195,6 @@ function flush_all()
     flush(STDERR)
 end
 
-function oslibuv_flush()
-    #refs: https://github.com/JuliaLang/IJulia.jl/issues/347#issuecomment-144505862
-    #      https://github.com/JuliaLang/IJulia.jl/issues/347#issuecomment-144605024
-    @windows_only ccall(:SwitchToThread, stdcall, Void, ())
-    yield()
-    yield()
-end
 # =======
     # global tasks = Dict(current_task() => "OG task")
     # @vprintln("tasks is", tasks)
@@ -236,6 +229,14 @@ end
 #     end
 # end
 # >>>>>>> Somewhat working... using non-standard throttle
+
+function oslibuv_flush()
+    #refs: https://github.com/JuliaLang/IJulia.jl/issues/347#issuecomment-144505862
+    #and https://github.com/JuliaLang/IJulia.jl/issues/347#issuecomment-144605024
+    @windows_only ccall(:SwitchToThread, stdcall, Void, ())
+    yield()
+    yield()
+end
 
 import Base.flush
 function flush(io::StdioPipe)
