@@ -4,13 +4,13 @@ module IJulia
 using Compat
 
 # in the Jupyter front-end, enable verbose output via IJulia.set_verbose()
-verbose = false
+verbose = true
 function set_verbose(v::Bool=true)
     global verbose::Bool = v
 end
 
 # set this to false for debugging, to disable stderr redirection
-const capture_stderr = true
+const capture_stderr = false
 
 using ZMQ
 using JSON
@@ -110,24 +110,16 @@ function init(args)
 
     global read_stdin
     global write_stdin
-    global read_stdout
-    global write_stdout
-    global read_stderr
-    global write_stderr
     read_stdin, write_stdin = redirect_stdin()
-    read_stdout, write_stdout = redirect_stdout()
-    if capture_stderr
-        read_stderr, write_stderr = redirect_stderr()
-    else
-        read_stderr, write_stderr = IOBuffer(), IOBuffer()
-    end
-
+    redirect_std()
+    start_stream_senders()
     send_status("starting")
     global inited = true
 end
 
-include("stdio.jl")
+include("debug.jl")
 include("msg.jl")
+include("stdio.jl")
 include("history.jl")
 include("handlers.jl")
 include("heartbeat.jl")
@@ -160,7 +152,7 @@ function eventloop(socket)
                                  msg_pub(execute_msg, "error", content))
                 end
             finally
-                send_status("idle", msg.header)
+                # send_status("idle", msg.header)
             end
         end
     catch e

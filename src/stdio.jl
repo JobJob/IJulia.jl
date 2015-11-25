@@ -2,61 +2,33 @@
 # we redirect STDOUT and STDERR into "stream" messages sent to the IPython
 # front-end.
 
-# logging in verbose mode goes to original stdio streams.  Use macros
-# so that we do not even evaluate the arguments in no-verbose modes
-
-function get_log_preface()
-    t = now()
-    taskname = get(task_local_storage(), :IJulia_task, "")
-    @sprintf("%02d:%02d:%02d(%s): ", Dates.hour(t),Dates.minute(t),Dates.second(t),taskname)
-end
-
-
-macro vprintln(x...)
-    quote
-        if verbose::Bool
-            println(orig_STDOUT, get_log_preface(), $(x...))
-        end
-    end
-end
-
-macro verror_show(e, bt)
-    quote
-        if verbose::Bool
-            showerror(orig_STDERR, $e, $bt)
-        end
-    end
-end
-
 #name=>iobuffer for each stream ("stdout","stderr") so they can be sent in flush
-const bufs = Dict{ASCIIString,IOBuffer}()
 const stream_interval = 0.1
 const max_bytes = 10*1024
-
-function send_stream(s::AbstractString, name::AbstractString)
-    # @vprintln("send_stream in $(tasks[current_task()])")
-    send_ipython(publish,
-                     msg_pub(execute_msg, "stream",
-                             @compat Dict("name" => name, "text" => s)))
-end
-
+const all_streams = Dict{Int, Tuple{IOBuffer, Msg}}()
 """Continually read from (size limited) Libuv/OS buffer into an (effectively unlimited) `IObuffer`
 to avoid problems when the Libuv/OS buffer gets full (https://github.com/JuliaLang/julia/issues/8789).
 Send data immediately when buffer contains more than `max_bytes` bytes. Otherwise, if data is available
 it will be sent every `stream_interval` seconds (see the Timers set up in watch_stdio)"""
 function watch_stream(rd::IO, name::AbstractString)
     task_local_storage(:IJulia_task, "read $name task")
+    # task_local_storage(symbol("stream_",name), rd)
+    cell = _n
+    parent_msg = execute_msg
+    buf = IOBuffer()
+    all_streams[_n] = (buf, parent_msg)
+    @vprintln("n is $_n, all_streams is $all_streams")
     try
-        buf = IOBuffer()
-        bufs[name] = buf
         while !eof(rd) # blocks until something is available
             nb = nb_available(rd)
             if nb > 0
                 write(buf, readbytes(rd, nb))
             end
             if buf.size >= max_bytes
-                #send immediately
-                send_stream(name)
+                if buf.size >= max_bytes
+                    #send immediately
+                    send_stream(name, cell, buf, parent_msg)
+                end
             end
             # if buf.size > 0
             #     next_send_time[name] = nb > max_bytes ? time() : prev_send_time[name] + stream_interval
@@ -88,8 +60,18 @@ end
 send_stdout(t::Timer) = send_stdio("stdout")
 send_stderr(t::Timer) = send_stdio("stderr")
 
+function empty_buffer_filter(cell::Int, buf_and_msg::Tuple{IOBuffer, Msg})
+    buf = buf_and_msg[1]
+    buf.size > 0
+end
+
 function send_stream(name::AbstractString)
-    buf = bufs[name]
+    for (cell, buf_and_msg::Tuple{IOBuffer, Msg}) in filter(empty_buffer_filter, all_streams)
+        send_stream(name, cell, buf_and_msg...)
+    end
+end
+
+function send_stream(name::AbstractString, cell::Int, buf::IOBuffer, parent_msg::Msg)
     if buf.size > 0
         d = takebuf_array(buf)
         n = num_utf8_trailing(d)
@@ -170,15 +152,38 @@ end
 
 function watch_stdio()
     task_local_storage(:IJulia_task, "init task")
+    redirect_std()
     read_task = @async watch_stream(read_stdout, "stdout")
-    #send STDOUT stream msgs every stream_interval secs (if there is output to send)
-    Timer(send_stdout, stream_interval, stream_interval)
     if capture_stderr
         readerr_task = @async watch_stream(read_stderr, "stderr")
-        #send STDERR stream msgs every stream_interval secs (if there is output to send)
+    end
+end
+
+function start_stream_senders()
+    #single timer for sending all output
+    #send stream msgs every stream_interval secs (if there is output to send)
+    Timer(send_stdout, stream_interval, stream_interval)
+    if capture_stderr
         Timer(send_stderr, stream_interval, stream_interval)
     end
 end
+
+function redirect_std()
+    global read_stdout
+    global write_stdout
+    global read_stderr
+    global write_stderr
+
+    # @closeall read_stdout write_stdout read_stderr write_stderr
+
+    read_stdout, write_stdout = redirect_stdout()
+    if capture_stderr
+        read_stderr, write_stderr = redirect_stderr()
+    else
+        read_stderr, write_stderr = IOBuffer(), IOBuffer()
+    end
+end
+
 
 function flush_all()
     flush_cstdio() # flush writes to stdout/stderr by external C code

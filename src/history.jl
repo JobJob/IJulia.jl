@@ -32,6 +32,7 @@ clear_history{T<:Integer}(r::Range{T}) =
 function clear_history()
     empty!(In)
     empty!(Out)
+    #clear all_streams, stop watching tasks ?
     global ans = nothing
 end
 

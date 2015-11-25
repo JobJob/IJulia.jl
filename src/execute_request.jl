@@ -151,6 +151,7 @@ function execute_request_0x535c5df2(socket, msg)
 
     if !silent
         _n += 1
+        IJulia.watch_stdio()
         send_ipython(publish,
                      msg_pub(msg, "execute_input",
                              @compat Dict("execution_count" => _n,
