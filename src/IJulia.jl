@@ -126,7 +126,6 @@ function init(args)
     global inited = true
 end
 
-include("throttle.jl")
 include("stdio.jl")
 include("msg.jl")
 include("history.jl")
