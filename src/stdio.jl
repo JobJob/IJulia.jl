@@ -50,9 +50,6 @@ function watch_stream(rd::IO, name::AbstractString)
         buf = IOBuffer()
         bufs[name] = buf
         while !eof(rd) # blocks until something is available
-            # @vprintln("eof return in watch_stream in $(tasks[current_task()]). nb_available is $(nb_available(rd)) status is $(rd.status)")
-            # @vprintln("wake nb_available is $(nb_available(rd))")
-            # Base.start_reading()
             nb = nb_available(rd)
             if nb > 0
                 write(buf, readbytes(rd, nb))
