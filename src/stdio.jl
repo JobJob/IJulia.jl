@@ -5,7 +5,10 @@
 const stream_interval = 0.1
 const max_bytes = 10*1024
 #name=>(iobuffer, parent_msg) for each stream ("stdout","stderr") so they can be sent in flush
-typealias BufNStuff Tuple{IOBuffer, Msg, IO}
+type BufNStuff
+    buffs::Dict{ASCIIString,IOBuffer}
+    parent_msg::Msg
+end
 const cell2stream = Dict{Int, BufNStuff}()
 
 """Continually read from (size limited) Libuv/OS buffer into an (effectively unlimited) `IObuffer`
@@ -13,13 +16,17 @@ to avoid problems when the Libuv/OS buffer gets full (https://github.com/JuliaLa
 Send data immediately when buffer contains more than `max_bytes` bytes. Otherwise, if data is available
 it will be sent every `stream_interval` seconds (see the Timers set up in watch_stdio)"""
 function watch_stream(rd::IO, name::AbstractString)
-    task_local_storage(:IJulia_task, "read $name task")
+    task_local_storage(:IJulia_task, "watch $name [$_n] task")
+
     # task_local_storage(symbol("stream_",name), rd)
     cell = _n
     parent_msg = execute_msg
     buf = IOBuffer()
-    cell2stream[_n] = (buf, parent_msg, rd)
-    @vprintln("n is $_n, cell2stream is $cell2stream")
+    if !haskey(cell2stream, _n)
+        cell2stream[_n] = BufNStuff(Dict(name=>buf), parent_msg)
+    else
+        cell2stream[_n].buffs[name] = buf
+    end
     try
         while !eof(rd) # blocks until something is available
             nb = nb_available(rd)
@@ -27,19 +34,9 @@ function watch_stream(rd::IO, name::AbstractString)
                 write(buf, readbytes(rd, nb))
             end
             if buf.size >= max_bytes
-                if buf.size >= max_bytes
-                    #send immediately
-                    send_stream(name, cell, buf, parent_msg)
-                end
+                #send immediately
+                send_stream(name, cell, buf, parent_msg)
             end
-            # if buf.size > 0
-            #     next_send_time[name] = nb > max_bytes ? time() : prev_send_time[name] + stream_interval
-            #     @vprintln("next_send_time[name] is $(string(Dates.unix2datetime(next_send_time[name]))[12:end]) buf.size: $buf.size")
-            #     if fire_time[send_timer[name]] > next_send_time[name]
-            #         Timer(next_send_time[name], schedule_send(name))
-            #     tasks[schedsend_task] = "schedsend $name"
-            # end
-            # @vprintln("$(tasks[current_task()]) will block now and await output in eof()")
         end
     catch e
         # the IPython manager may send us a SIGINT if the user
@@ -54,7 +51,7 @@ end
 
 function send_stdio(name)
     if verbose::Bool && !haskey(task_local_storage(), :IJulia_task)
-        task_local_storage(:IJulia_task, "send $name task")
+        task_local_storage(:IJulia_task, "timed send $name task")
     end
     send_stream(name)
 end
@@ -62,14 +59,14 @@ end
 send_stdout(t::Timer) = send_stdio("stdout")
 send_stderr(t::Timer) = send_stdio("stderr")
 
-function empty_buffer_filter(cell::Int, buf_and_msg::BufNStuff)
-    buf = buf_and_msg[1]
-    buf.size > 0
-end
-
 function send_stream(name::AbstractString)
+    function empty_buffer_filter(cell::Int, buf_and_msg::BufNStuff)
+        !haskey(buf_and_msg.buffs, name) && return false
+        buf = buf_and_msg.buffs[name]
+        buf.size > 0
+    end
     for (cell, buf_and_msg::BufNStuff) in filter(empty_buffer_filter, cell2stream)
-        send_stream(name, cell, buf_and_msg[1], buf_and_msg[2])
+        send_stream(name, cell, buf_and_msg.buffs[name], buf_and_msg.parent_msg)
     end
 end
 
@@ -153,20 +150,10 @@ function readline(io::StdioPipe)
 end
 
 function watch_stdio()
-    task_local_storage(:IJulia_task, "init task")
     redirect_std()
     read_task = @async watch_stream(read_stdout, "stdout")
     if capture_stderr
         readerr_task = @async watch_stream(read_stderr, "stderr")
-    end
-end
-
-function start_stream_senders()
-    #single timer for sending all output
-    #send stream msgs every stream_interval secs (if there is output to send)
-    Timer(send_stdout, stream_interval, stream_interval)
-    if capture_stderr
-        Timer(send_stderr, stream_interval, stream_interval)
     end
 end
 
@@ -190,28 +177,32 @@ function redirect_std()
     end
 end
 
-function get_parent_std(default)
+function start_stream_senders()
+    #single timer for sending all output
+    #send stream msgs every stream_interval secs (if there is output to send)
+    Timer(send_stdout, stream_interval, stream_interval)
+    if capture_stderr
+        Timer(send_stderr, stream_interval, stream_interval)
+    end
+end
+
+
+function get_parent_std(stream)
+    task2stream = (stream == STDERR) ? task2stderr : task2stdout
     t = current_task()
     while(true)
-        if haskey(task2stdout, t)
-            return task2stdout[t]
+        if haskey(task2stream, t)
+            return task2stream[t]
         end
         t.parent == t && break
         t = t.parent
     end
-    return default
+    return stream
 end
 
-function Base.print(xs...)
+function Base.print(io::StdioPipe, xs...)
     taskio = get_parent_std(io)
-    print(taskio, xs...)
-    #invoke(print, (super(StdioPipe),Any), taskio, x)
-end
-
-function Base.println(xs...)
-    taskio = get_parent_std(STDOUT)
-    println(taskio, xs...)
-    #invoke(print, (super(StdioPipe),Any), taskio, x)
+    invoke(print, (IO,Vararg{Any}), taskio, xs...)
 end
 
 function flush_all()

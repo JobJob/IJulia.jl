@@ -10,7 +10,7 @@ function set_verbose(v::Bool=true)
 end
 
 # set this to false for debugging, to disable stderr redirection
-const capture_stderr = false
+const capture_stderr = true
 
 using ZMQ
 using JSON
@@ -123,7 +123,7 @@ include("handlers.jl")
 include("heartbeat.jl")
 
 function eventloop(socket)
-    task_local_storage(:IJulia_task, "write task")
+    task_local_storage(:IJulia_task, "eventloop task")
     try
         while true
             msg = recv_ipython(socket)

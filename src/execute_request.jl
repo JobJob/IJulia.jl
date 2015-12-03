@@ -139,13 +139,14 @@ function helpcode(code::AbstractString)
     end
 end
 
-# note: 0x535c5df2/3 are random integers to make name collisions in
+# note: 0x535c5df2/0x847c6a3b are random integers to make name collisions in
 # backtrace analysis less likely.
 function execute_request_0x535c5df2(socket, msg)
-    @async execute_request_0x535c5df3(socket, msg)
+    @async execute_request_0x847c6a3b(socket, msg)
 end
 
-function execute_request_0x535c5df3(socket, msg)
+function execute_request_0x847c6a3b(socket, msg)
+    task_local_storage(:IJulia_task, "exec [$(_n+1)] task")
     code = msg.content["code"]
     @vprintln("EXECUTING ", code)
     global execute_msg = msg
@@ -155,6 +156,7 @@ function execute_request_0x535c5df3(socket, msg)
 
     if !silent
         _n += 1
+        task_local_storage(:IJulia_task, "exec [$_n] task")
         IJulia.watch_stdio()
         send_ipython(publish,
                      msg_pub(msg, "execute_input",
@@ -184,9 +186,7 @@ function execute_request_0x535c5df3(socket, msg)
         end
 
         #run the code!
-        @vprintln("code: ",code)
         ans = result = include_string(code, "In[$_n]")
-        @vprintln("res: ",result)
 
         if silent
             result = nothing
