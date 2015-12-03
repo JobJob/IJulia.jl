@@ -139,9 +139,13 @@ function helpcode(code::AbstractString)
     end
 end
 
-# note: 0x535c5df2 is a random integer to make name collisions in
+# note: 0x535c5df2/3 are random integers to make name collisions in
 # backtrace analysis less likely.
 function execute_request_0x535c5df2(socket, msg)
+    @async execute_request_0x535c5df3(socket, msg)
+end
+
+function execute_request_0x535c5df3(socket, msg)
     code = msg.content["code"]
     @vprintln("EXECUTING ", code)
     global execute_msg = msg
@@ -182,7 +186,7 @@ function execute_request_0x535c5df2(socket, msg)
         #run the code!
         @vprintln("code: ",code)
         ans = result = include_string(code, "In[$_n]")
-        @vprintln("code: ",res)
+        @vprintln("res: ",result)
 
         if silent
             result = nothing

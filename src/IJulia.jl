@@ -53,7 +53,9 @@ end
 
 inited = false
 const threadid = Array(Int, 128) # sizeof(uv_thread_t) <= 8 on Linux, OSX, Win
-
+const orig_STDIN = STDIN
+const orig_STDOUT = STDOUT
+const orig_STDERR = STDERR
 function init(args)
     if length(args) > 0
         global const profile = open(JSON.parse,args[1])
@@ -103,10 +105,6 @@ function init(args)
 
     global const heartbeat_c = cfunction(heartbeat_thread, Void, (Ptr{Void},))
     start_heartbeat(heartbeat)
-
-    global const orig_STDIN = STDIN
-    global const orig_STDOUT = STDOUT
-    global const orig_STDERR = STDERR
 
     global read_stdin
     global write_stdin

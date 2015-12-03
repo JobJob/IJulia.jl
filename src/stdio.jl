@@ -2,10 +2,12 @@
 # we redirect STDOUT and STDERR into "stream" messages sent to the IPython
 # front-end.
 
-#name=>iobuffer for each stream ("stdout","stderr") so they can be sent in flush
 const stream_interval = 0.1
 const max_bytes = 10*1024
-const all_streams = Dict{Int, Tuple{IOBuffer, Msg}}()
+#name=>(iobuffer, parent_msg) for each stream ("stdout","stderr") so they can be sent in flush
+typealias BufNStuff Tuple{IOBuffer, Msg, IO}
+const cell2stream = Dict{Int, BufNStuff}()
+
 """Continually read from (size limited) Libuv/OS buffer into an (effectively unlimited) `IObuffer`
 to avoid problems when the Libuv/OS buffer gets full (https://github.com/JuliaLang/julia/issues/8789).
 Send data immediately when buffer contains more than `max_bytes` bytes. Otherwise, if data is available
@@ -16,8 +18,8 @@ function watch_stream(rd::IO, name::AbstractString)
     cell = _n
     parent_msg = execute_msg
     buf = IOBuffer()
-    all_streams[_n] = (buf, parent_msg)
-    @vprintln("n is $_n, all_streams is $all_streams")
+    cell2stream[_n] = (buf, parent_msg, rd)
+    @vprintln("n is $_n, cell2stream is $cell2stream")
     try
         while !eof(rd) # blocks until something is available
             nb = nb_available(rd)
@@ -60,14 +62,14 @@ end
 send_stdout(t::Timer) = send_stdio("stdout")
 send_stderr(t::Timer) = send_stdio("stderr")
 
-function empty_buffer_filter(cell::Int, buf_and_msg::Tuple{IOBuffer, Msg})
+function empty_buffer_filter(cell::Int, buf_and_msg::BufNStuff)
     buf = buf_and_msg[1]
     buf.size > 0
 end
 
 function send_stream(name::AbstractString)
-    for (cell, buf_and_msg::Tuple{IOBuffer, Msg}) in filter(empty_buffer_filter, all_streams)
-        send_stream(name, cell, buf_and_msg...)
+    for (cell, buf_and_msg::BufNStuff) in filter(empty_buffer_filter, cell2stream)
+        send_stream(name, cell, buf_and_msg[1], buf_and_msg[2])
     end
 end
 
@@ -93,7 +95,7 @@ function send_stream(name::AbstractString, cell::Int, buf::IOBuffer, parent_msg:
             s = takebuf_string(sbuf)
         end
         send_ipython(publish,
-             msg_pub(execute_msg, "stream",
+             msg_pub(parent_msg, "stream",
                      @compat Dict("name" => name, "text" => s)))
     end
 end
@@ -168,6 +170,8 @@ function start_stream_senders()
     end
 end
 
+const task2stdout = Dict{Task, IO}()
+const task2stderr = Dict{Task, IO}()
 function redirect_std()
     global read_stdout
     global write_stdout
@@ -175,56 +179,46 @@ function redirect_std()
     global write_stderr
 
     # @closeall read_stdout write_stdout read_stderr write_stderr
-
     read_stdout, write_stdout = redirect_stdout()
+    t = current_task()
+    task2stdout[t] = write_stdout
     if capture_stderr
         read_stderr, write_stderr = redirect_stderr()
+        task2stderr[t] = write_stderr
     else
         read_stderr, write_stderr = IOBuffer(), IOBuffer()
     end
 end
 
+function get_parent_std(default)
+    t = current_task()
+    while(true)
+        if haskey(task2stdout, t)
+            return task2stdout[t]
+        end
+        t.parent == t && break
+        t = t.parent
+    end
+    return default
+end
+
+function Base.print(xs...)
+    taskio = get_parent_std(io)
+    print(taskio, xs...)
+    #invoke(print, (super(StdioPipe),Any), taskio, x)
+end
+
+function Base.println(xs...)
+    taskio = get_parent_std(STDOUT)
+    println(taskio, xs...)
+    #invoke(print, (super(StdioPipe),Any), taskio, x)
+end
 
 function flush_all()
     flush_cstdio() # flush writes to stdout/stderr by external C code
     flush(STDOUT)
     flush(STDERR)
 end
-
-# =======
-    # global tasks = Dict(current_task() => "OG task")
-    # @vprintln("tasks is", tasks)
-    # read_task = @async watch_stream(read_stdout, "stdout")
-    # tasks[read_task] = "read stdout task"
-    # prev_send_time["stdout"] = 0.0 #initialise
-    # if capture_stderr
-    #     readerr_task = @async watch_stream(read_stderr, "stderr")
-    #     tasks[readerr_task] = "read stderr task"
-    #     prev_send_time["stderr"] = 0.0
-    # end
-    # end
-
-# import Base.wait_readnb
-# function wait_readnb(x::Base.LibuvStream, nb::Int)
-#     oldthrottle = x.throttle
-#     Base.preserve_handle(x)
-#     try
-#         while isopen(x) && nb_available(x.buffer) < nb
-#             x.throttle = max(nb, x.throttle)
-#             Base.start_reading(x) # ensure we are reading
-#             wait(x.readnotify)
-#         end
-#     finally
-#         if oldthrottle <= x.throttle <= nb
-#             x.throttle = oldthrottle
-#         end
-#         # if isempty(x.readnotify.waitq)
-#         #     # stop_reading(x) # stop reading iff there are currently no other read clients of the stream
-#         # end
-#         Base.unpreserve_handle(x)
-#     end
-# end
-# >>>>>>> Somewhat working... using non-standard throttle
 
 function oslibuv_flush()
     #refs: https://github.com/JuliaLang/IJulia.jl/issues/347#issuecomment-144505862
